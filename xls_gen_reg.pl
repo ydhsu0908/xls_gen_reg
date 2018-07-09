@@ -296,7 +296,7 @@ sub print_reg_write{
          if($addr_reg_mask[$i][$j] == 0) {
            $mask_exist  = 1;
            if($first_print == 0) {
-              printf $of  "      if(int_reg_mask[1] == 1'b0) begin\n";
+              printf $of  "      if(int_reg_mask[0] == 1'b0) begin\n";
               $first_print = 1;
            }
            #printf $of  "        ".$addr_reg_name[$i][$j]." <= int_regin".$addr_reg_bits[$i][$j].";\n";
