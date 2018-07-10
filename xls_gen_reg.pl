@@ -121,7 +121,9 @@ foreach my $sheet (@{$excel -> {Worksheet}}) {
        check_missing();
 
        # Add register to dfvl array
-       addr_reg_to_dfvl_array();
+       if($attr eq "RW"){
+         addr_reg_to_dfvl_array();
+       }
 
        # Add register to write and read array
        if(@bits_arr > 1) { ##bits is bus
@@ -216,100 +218,113 @@ sub print_reg_read{
 sub print_reg_write{
    my $first_print;
    my $mask_exist;
+   my $ro_addr;
+   my $rw_addr;
+
    printf $of  "//========================\n";
    printf $of  "//Register Write logic\n";
    printf $of  "//========================\n";
+
    for($i=1; $i<=$addr_no; $i++) {
-      printf $of  "//Register[".$addr_reg_addr[$i]."]\n";
-      printf $of  "always @(posedge clk2 or negedge rst_n)\n";
-      printf $of  "  if(!rst_n) begin\n";
+
+      $rw_addr = $addr_reg_addr[$i];
+      $ro_addr = $addr_ro_reg_addr[$i];
+
+      if($ro_addr == $rw_addr) {
+         printf $of  "//Register[".$addr_reg_addr[$i]."]\n";
+         printf $of  "always @(posedge clk2 or negedge rst_n)\n";
+         printf $of  "  if(!rst_n) begin\n";
+      }
 
       for($j=1; $j<=$addr_dv_reg_no[$i]; $j++) {
           #printf $of  "        ".$addr_dv_reg_name[$i][$j]." <= ".$addr_dv_reg_dfvl[$i][$j].";\n";
           printf $of  "        %-30s <= %-30s\n",$addr_dv_reg_name[$i][$j],$addr_dv_reg_dfvl[$i][$j].";";
       } 
 
-      printf $of  "  end\n";
-      printf $of  "  else if(int_reg_write && int_reg_command_valid) begin\n";
-      printf $of  "    if(int_reg_phy_addr == ".$addr_reg_addr[$i].") begin\n";
-      ##mask[3]
-      $first_print = 0;
-      $mask_exist  = 0;
-      for($j=1; $j<=$addr_reg_no[$i]; $j++) {
-         if($addr_reg_mask[$i][$j] == 3) {
-           $mask_exist  = 1;
-           if($first_print == 0) {
-              printf $of  "      if(int_reg_mask[3] == 1'b0) begin\n";
-              $first_print = 1;
-           }
-           #printf $of  "        ".$addr_reg_name[$i][$j]." <= int_regin".$addr_reg_bits[$i][$j].";\n";
-           printf $of  "        %-30s <= int_regin%-10s\n",$addr_reg_name[$i][$j],$addr_reg_bits[$i][$j].";";
-         }
-      }
-      if($mask_exist == 1) {
-        printf $of  "      end\n";
-        $mask_exist  = 0;
-      }
+      if($ro_addr == $rw_addr) {
+             printf $of  "  end\n";
+             printf $of  "  else if(int_reg_write && int_reg_command_valid) begin\n";
+             printf $of  "    if(int_reg_phy_addr == ".$addr_reg_addr[$i].") begin\n";
 
-      ##mask[2]
-      $first_print = 0;
-      $mask_exist  = 0;
-      for($j=1; $j<=$addr_reg_no[$i]; $j++) {
-         if($addr_reg_mask[$i][$j] == 2) {
-           $mask_exist  = 1;
-           if($first_print == 0) {
-              printf $of  "      if(int_reg_mask[2] == 1'b0) begin\n";
-              $first_print = 1;
-           }
-           #printf $of  "        ".$addr_reg_name[$i][$j]." <= int_regin".$addr_reg_bits[$i][$j].";\n";
-           printf $of  "        %-30s <= int_regin%-10s\n",$addr_reg_name[$i][$j],$addr_reg_bits[$i][$j].";";
-         }
-      }
-      if($mask_exist == 1) {
-        printf $of  "      end\n";
-        $mask_exist  = 0;
-      }
+             ##mask[3]
+             $first_print = 0;
+             $mask_exist  = 0;
+             for($j=1; $j<=$addr_reg_no[$i]; $j++) {
+                if($addr_reg_mask[$i][$j] == 3) {
+                  $mask_exist  = 1;
+                  if($first_print == 0) {
+                     printf $of  "      if(int_reg_mask[3] == 1'b0) begin\n";
+                     $first_print = 1;
+                  }
+                  #printf $of  "        ".$addr_reg_name[$i][$j]." <= int_regin".$addr_reg_bits[$i][$j].";\n";
+                  printf $of  "        %-30s <= int_regin%-10s\n",$addr_reg_name[$i][$j],$addr_reg_bits[$i][$j].";";
+                }
+             }
+             if($mask_exist == 1) {
+               printf $of  "      end\n";
+               $mask_exist  = 0;
+             }
 
-      ##mask[1]
-      $first_print = 0;
-      $mask_exist  = 0;
-      for($j=1; $j<=$addr_reg_no[$i]; $j++) {
-         if($addr_reg_mask[$i][$j] == 1) {
-           $mask_exist  = 1;
-           if($first_print == 0) {
-              printf $of  "      if(int_reg_mask[1] == 1'b0) begin\n";
-              $first_print = 1;
-           }
-           #printf $of  "        ".$addr_reg_name[$i][$j]." <= int_regin".$addr_reg_bits[$i][$j].";\n";
-           printf $of  "        %-30s <= int_regin%-10s\n",$addr_reg_name[$i][$j],$addr_reg_bits[$i][$j].";";
-         }
-      }
-      if($mask_exist == 1) {
-        printf $of  "      end\n";
-        $mask_exist  = 0;
-      }
+             ##mask[2]
+             $first_print = 0;
+             $mask_exist  = 0;
+             for($j=1; $j<=$addr_reg_no[$i]; $j++) {
+                if($addr_reg_mask[$i][$j] == 2) {
+                  $mask_exist  = 1;
+                  if($first_print == 0) {
+                     printf $of  "      if(int_reg_mask[2] == 1'b0) begin\n";
+                     $first_print = 1;
+                  }
+                  #printf $of  "        ".$addr_reg_name[$i][$j]." <= int_regin".$addr_reg_bits[$i][$j].";\n";
+                  printf $of  "        %-30s <= int_regin%-10s\n",$addr_reg_name[$i][$j],$addr_reg_bits[$i][$j].";";
+                }
+             }
+             if($mask_exist == 1) {
+               printf $of  "      end\n";
+               $mask_exist  = 0;
+             }
 
-      ##mask[0]
-      $first_print = 0;
-      $mask_exist  = 0;
-      for($j=1; $j<=$addr_reg_no[$i]; $j++) {
-         if($addr_reg_mask[$i][$j] == 0) {
-           $mask_exist  = 1;
-           if($first_print == 0) {
-              printf $of  "      if(int_reg_mask[0] == 1'b0) begin\n";
-              $first_print = 1;
-           }
-           #printf $of  "        ".$addr_reg_name[$i][$j]." <= int_regin".$addr_reg_bits[$i][$j].";\n";
-           printf $of  "        %-30s <= int_regin%-10s\n",$addr_reg_name[$i][$j],$addr_reg_bits[$i][$j].";";
-         }
-      }
-      if($mask_exist == 1) {
-        printf $of  "      end\n";
-        $mask_exist  = 0;
-      }
+             ##mask[1]
+             $first_print = 0;
+             $mask_exist  = 0;
+             for($j=1; $j<=$addr_reg_no[$i]; $j++) {
+                if($addr_reg_mask[$i][$j] == 1) {
+                  $mask_exist  = 1;
+                  if($first_print == 0) {
+                     printf $of  "      if(int_reg_mask[1] == 1'b0) begin\n";
+                     $first_print = 1;
+                  }
+                  #printf $of  "        ".$addr_reg_name[$i][$j]." <= int_regin".$addr_reg_bits[$i][$j].";\n";
+                  printf $of  "        %-30s <= int_regin%-10s\n",$addr_reg_name[$i][$j],$addr_reg_bits[$i][$j].";";
+                }
+             }
+             if($mask_exist == 1) {
+               printf $of  "      end\n";
+               $mask_exist  = 0;
+             }
 
-      printf $of  "    end \n";
-      printf $of  "  end \n\n\n";
+             ##mask[0]
+             $first_print = 0;
+             $mask_exist  = 0;
+             for($j=1; $j<=$addr_reg_no[$i]; $j++) {
+                if($addr_reg_mask[$i][$j] == 0) {
+                  $mask_exist  = 1;
+                  if($first_print == 0) {
+                     printf $of  "      if(int_reg_mask[0] == 1'b0) begin\n";
+                     $first_print = 1;
+                  }
+                  #printf $of  "        ".$addr_reg_name[$i][$j]." <= int_regin".$addr_reg_bits[$i][$j].";\n";
+                  printf $of  "        %-30s <= int_regin%-10s\n",$addr_reg_name[$i][$j],$addr_reg_bits[$i][$j].";";
+                }
+             }
+             if($mask_exist == 1) {
+               printf $of  "      end\n";
+               $mask_exist  = 0;
+             }
+
+             printf $of  "    end \n";
+             printf $of  "  end \n\n\n";
+      }
   }
 }
 ##--------------------------------------------------------------------------------------------------
@@ -634,7 +649,13 @@ sub check_bit_duplicate{
 ##--------------------------------------------------------------------------------------------------
 sub addr_array_init {
    $addr_reg_no[$addr_no]  = 0;
-   $addr_reg_addr[$addr_no]= $addr;
+
+   if($attr eq "RW") {
+       $addr_reg_addr[$addr_no]= $addr;
+   } else {
+       $addr_reg_addr[$addr_no]= -1;
+   }
+
    for($i=1; $i<33; $i++){
      $addr_reg_name[$addr_no][$i]    = "";
      $addr_reg_bits[$addr_no][$i]    = "";
