@@ -15,6 +15,7 @@ my $addr; ##address (dec)
 my $name; ##name
 my $bits; ##bits
 my $attr; ##Attribute
+my $sw;   ##SWPath
 my $dfvl; ##default value
 my $cur_addr;
 my $cur_start_bit;
@@ -41,26 +42,36 @@ my @addr_reg_addr;     ##1-D array, valid register address of each address, max 
 my @addr_reg_name;     ##2-D array, valid register names of each address, max 32 names array
 my @addr_reg_bits;     ##2-D array, valid register bits of each address, max 32 names array
 my @addr_reg_mask;     ##2-D array, valid mask sets of each addresss, max 32 mask array
+my @addr_reg_swph;     ##2-D array, valid register sw path of each address, max 32
 
 ##For Read
 my @addr_ro_reg_no;    ##1-D array, valid register numbers of each address, max 32
 my @addr_ro_reg_addr;  ##1-D array, valid register address of each address, max 32
 my @addr_ro_reg_name;  ##2-D array, valid register names of each address, max 32 names array
-my @addr_ro_reg_bits;     ##2-D array, valid register bits of each address, max 32 names array
+my @addr_ro_reg_bits;  ##2-D array, valid register bits of each address, max 32 names array
 
 ##For Write default value array
 my @addr_dv_reg_no;    ##1-D array, valid register numbers of each address, max 32
 my @addr_dv_reg_name;  ##2-D array, valid register names of each address, max 32 names array
 my @addr_dv_reg_dfvl;  ##2-D array, valid register default value of each addresss, max 32 mask array
 
-$addr_no = 0;
+
+printf     "//Created by xls_gen_reg.pl \n";
+$datestring = localtime();
+printf     "//$datestring\n\n";
 
 #########################################
 ## Scan each Sheet
 #########################################
 foreach my $sheet (@{$excel -> {Worksheet}}) {
 
+   $addr_no = 0;
+
    open $of, "> ./$sheet->{Name}.v" or die "Can't open file to write\n";
+    
+   printf     "===================================== \n";
+   printf     "Sheet: ". $sheet->{Name}."\n";
+   printf     "===================================== \n";
 
    $sheet -> {MaxRow} ||= $sheet -> {MinRow};
 
@@ -68,10 +79,6 @@ foreach my $sheet (@{$excel -> {Worksheet}}) {
      $sheet -> {MaxCol} ||= $sheet -> {MinCol};
    }
     
-   printf     "//Created by xls_gen_reg.pl \n";
-   $datestring = localtime();
-   printf     "//$datestring\n\n";
-
    my $min_row = $sheet -> {MinRow};
    #printf "min_row:".$min_row."\n";
    my $max_row = $sheet -> {MaxRow};
@@ -85,11 +92,13 @@ foreach my $sheet (@{$excel -> {Worksheet}}) {
    ## Scan each Row
    #########################################
    foreach $i ($min_row+1 .. $max_row) {
-       $addr  = ($sheet -> {Cells} [$i] [$min_col+1]) -> {Val}; ##address (dec)
+      #$addr  = ($sheet -> {Cells} [$i] [$min_col+1]) -> {Val}; ##address (dec)
+       $addr  = ($sheet -> {Cells} [$i] [$min_col+0]) -> {Val}; ##address (dec)
        $name  = ($sheet -> {Cells} [$i] [$min_col+3]) -> {Val}; ##name
        $bits  = ($sheet -> {Cells} [$i] [$min_col+4]) -> {Val}; ##bits
        $dfvl  = ($sheet -> {Cells} [$i] [$min_col+5]) -> {Val}; ##Default value
        $attr  = ($sheet -> {Cells} [$i] [$min_col+6]) -> {Val}; ##Attribute
+       $sw    = ($sheet -> {Cells} [$i] [$min_col+8]) -> {Val}; ##SW path
        $cur_row = $i;
 
        #printf "addr= ".$addr."\n"; 
@@ -98,7 +107,12 @@ foreach my $sheet (@{$excel -> {Worksheet}}) {
        #printf "dfvl= ".$dfvl."\n"; 
        #printf "attr= ".$attr."\n"; 
 
-       if($addr != 0) {
+       if(($addr != 0) and ($addr ne "")) {
+         $cur_addr = $addr;
+         #printf "cur_addr= ".$cur_addr."\n"; 
+       }
+
+       if(($addr == 0) and ($addr ne "")) {
          $cur_addr = $addr;
          #printf "cur_addr= ".$cur_addr."\n"; 
        }
@@ -122,7 +136,7 @@ foreach my $sheet (@{$excel -> {Worksheet}}) {
 
        # Add register to dfvl array
        if($attr eq "RW"){
-         addr_reg_to_dfvl_array();
+          addr_reg_to_dfvl_array();
        }
 
        # Add register to write and read array
@@ -202,7 +216,7 @@ sub print_reg_read{
    printf $of  "  phy_regout = 32'h0;\n\n";
 
    for($i=1; $i<=$addr_no; $i++) {
-     printf $of  "  if(int_reg_read_command && (int_reg_phy_addr == ".$addr_ro_reg_addr[$i].") begin\n";
+     printf $of  "  if(int_reg_read_command && (int_reg_phy_addr == ".$addr_ro_reg_addr[$i].")) begin\n";
 
      for($j=1; $j<=$addr_ro_reg_no[$i]; $j++) {
        #printf $of  "    phy_regout".$addr_ro_reg_bits[$i][$j]." = ".$addr_ro_reg_name[$i][$j].";\n";
@@ -220,111 +234,148 @@ sub print_reg_write{
    my $mask_exist;
    my $ro_addr;
    my $rw_addr;
+   my $need_sw_path;
 
    printf $of  "//========================\n";
    printf $of  "//Register Write logic\n";
    printf $of  "//========================\n";
 
    for($i=1; $i<=$addr_no; $i++) {
-
+  
       $rw_addr = $addr_reg_addr[$i];
       $ro_addr = $addr_ro_reg_addr[$i];
 
-      if($ro_addr == $rw_addr) {
-         printf $of  "//Register[".$addr_reg_addr[$i]."]\n";
-         printf $of  "always @(posedge clk2 or negedge rst_n)\n";
-         printf $of  "  if(!rst_n) begin\n";
-      }
+      ##################################################################################
+                      if($ro_addr == $rw_addr) {
+                         printf $of  "//Register[".$addr_reg_addr[$i]."]\n";
+                         printf $of  "always @(posedge clk2 or negedge rst_n) begin\n";
+                         printf $of  "  if(!rst_n) begin\n";
+                      }
+   
+                      for($j=1; $j<=$addr_dv_reg_no[$i]; $j++) {
+                          #printf $of  "        ".$addr_dv_reg_name[$i][$j]." <= ".$addr_dv_reg_dfvl[$i][$j].";\n";
+                          printf $of  "        %-30s <= %-30s\n",$addr_dv_reg_name[$i][$j],$addr_dv_reg_dfvl[$i][$j].";";
+                      } 
 
-      for($j=1; $j<=$addr_dv_reg_no[$i]; $j++) {
-          #printf $of  "        ".$addr_dv_reg_name[$i][$j]." <= ".$addr_dv_reg_dfvl[$i][$j].";\n";
-          printf $of  "        %-30s <= %-30s\n",$addr_dv_reg_name[$i][$j],$addr_dv_reg_dfvl[$i][$j].";";
-      } 
+                      if($ro_addr == $rw_addr) {
+                            printf $of  "  end\n";
+                      }
 
-      if($ro_addr == $rw_addr) {
-             printf $of  "  end\n";
-             printf $of  "  else if(int_reg_write && int_reg_command_valid) begin\n";
-             printf $of  "    if(int_reg_phy_addr == ".$addr_reg_addr[$i].") begin\n";
+      ##################################################################################
+                      if($ro_addr == $rw_addr) {
+                            printf $of  "  else if(int_reg_write && int_reg_command_valid) begin\n";
+                            printf $of  "    if(int_reg_phy_addr == ".$addr_reg_addr[$i].") begin\n";
 
-             ##mask[3]
-             $first_print = 0;
-             $mask_exist  = 0;
-             for($j=1; $j<=$addr_reg_no[$i]; $j++) {
-                if($addr_reg_mask[$i][$j] == 3) {
-                  $mask_exist  = 1;
-                  if($first_print == 0) {
-                     printf $of  "      if(int_reg_mask[3] == 1'b0) begin\n";
-                     $first_print = 1;
-                  }
-                  #printf $of  "        ".$addr_reg_name[$i][$j]." <= int_regin".$addr_reg_bits[$i][$j].";\n";
-                  printf $of  "        %-30s <= int_regin%-10s\n",$addr_reg_name[$i][$j],$addr_reg_bits[$i][$j].";";
-                }
-             }
-             if($mask_exist == 1) {
-               printf $of  "      end\n";
-               $mask_exist  = 0;
-             }
+                            ##mask[3]
+                            $first_print = 0;
+                            $mask_exist  = 0;
+                            for($j=1; $j<=$addr_reg_no[$i]; $j++) {
+                               if($addr_reg_mask[$i][$j] == 3) {
+                                 $mask_exist  = 1;
+                                 if($first_print == 0) {
+                                    printf $of  "      if(int_reg_mask[3] == 1'b0) begin\n";
+                                    $first_print = 1;
+                                 }
+                                 #printf $of  "        ".$addr_reg_name[$i][$j]." <= int_regin".$addr_reg_bits[$i][$j].";\n";
+                                  printf $of  "        %-30s <= int_regin%-10s\n",$addr_reg_name[$i][$j],$addr_reg_bits[$i][$j].";";
+                               }
+                            }
+                            if($mask_exist == 1) {
+                              printf $of  "      end\n";
+                              $mask_exist  = 0;
+                            }
 
-             ##mask[2]
-             $first_print = 0;
-             $mask_exist  = 0;
-             for($j=1; $j<=$addr_reg_no[$i]; $j++) {
-                if($addr_reg_mask[$i][$j] == 2) {
-                  $mask_exist  = 1;
-                  if($first_print == 0) {
-                     printf $of  "      if(int_reg_mask[2] == 1'b0) begin\n";
-                     $first_print = 1;
-                  }
-                  #printf $of  "        ".$addr_reg_name[$i][$j]." <= int_regin".$addr_reg_bits[$i][$j].";\n";
-                  printf $of  "        %-30s <= int_regin%-10s\n",$addr_reg_name[$i][$j],$addr_reg_bits[$i][$j].";";
-                }
-             }
-             if($mask_exist == 1) {
-               printf $of  "      end\n";
-               $mask_exist  = 0;
-             }
+                            ##mask[2]
+                            $first_print = 0;
+                            $mask_exist  = 0;
+                            for($j=1; $j<=$addr_reg_no[$i]; $j++) {
+                               if($addr_reg_mask[$i][$j] == 2) {
+                                 $mask_exist  = 1;
+                                 if($first_print == 0) {
+                                    printf $of  "      if(int_reg_mask[2] == 1'b0) begin\n";
+                                    $first_print = 1;
+                                 }
+                                 #printf $of  "        ".$addr_reg_name[$i][$j]." <= int_regin".$addr_reg_bits[$i][$j].";\n";
+                                 printf $of  "        %-30s <= int_regin%-10s\n",$addr_reg_name[$i][$j],$addr_reg_bits[$i][$j].";";
+                               }
+                            }
+                            if($mask_exist == 1) {
+                              printf $of  "      end\n";
+                              $mask_exist  = 0;
+                            }
 
-             ##mask[1]
-             $first_print = 0;
-             $mask_exist  = 0;
-             for($j=1; $j<=$addr_reg_no[$i]; $j++) {
-                if($addr_reg_mask[$i][$j] == 1) {
-                  $mask_exist  = 1;
-                  if($first_print == 0) {
-                     printf $of  "      if(int_reg_mask[1] == 1'b0) begin\n";
-                     $first_print = 1;
-                  }
-                  #printf $of  "        ".$addr_reg_name[$i][$j]." <= int_regin".$addr_reg_bits[$i][$j].";\n";
-                  printf $of  "        %-30s <= int_regin%-10s\n",$addr_reg_name[$i][$j],$addr_reg_bits[$i][$j].";";
-                }
-             }
-             if($mask_exist == 1) {
-               printf $of  "      end\n";
-               $mask_exist  = 0;
-             }
+                            ##mask[1]
+                            $first_print = 0;
+                            $mask_exist  = 0;
+                            for($j=1; $j<=$addr_reg_no[$i]; $j++) {
+                               if($addr_reg_mask[$i][$j] == 1) {
+                                 $mask_exist  = 1;
+                                 if($first_print == 0) {
+                                    printf $of  "      if(int_reg_mask[1] == 1'b0) begin\n";
+                                    $first_print = 1;
+                                 }
+                                 #printf $of  "        ".$addr_reg_name[$i][$j]." <= int_regin".$addr_reg_bits[$i][$j].";\n";
+                                 printf $of  "        %-30s <= int_regin%-10s\n",$addr_reg_name[$i][$j],$addr_reg_bits[$i][$j].";";
+                               }
+                            }
+                            if($mask_exist == 1) {
+                              printf $of  "      end\n";
+                              $mask_exist  = 0;
+                            }
 
-             ##mask[0]
-             $first_print = 0;
-             $mask_exist  = 0;
-             for($j=1; $j<=$addr_reg_no[$i]; $j++) {
-                if($addr_reg_mask[$i][$j] == 0) {
-                  $mask_exist  = 1;
-                  if($first_print == 0) {
-                     printf $of  "      if(int_reg_mask[0] == 1'b0) begin\n";
-                     $first_print = 1;
-                  }
-                  #printf $of  "        ".$addr_reg_name[$i][$j]." <= int_regin".$addr_reg_bits[$i][$j].";\n";
-                  printf $of  "        %-30s <= int_regin%-10s\n",$addr_reg_name[$i][$j],$addr_reg_bits[$i][$j].";";
-                }
-             }
-             if($mask_exist == 1) {
-               printf $of  "      end\n";
-               $mask_exist  = 0;
-             }
+                            ##mask[0]
+                            $first_print = 0;
+                            $mask_exist  = 0;
+                            for($j=1; $j<=$addr_reg_no[$i]; $j++) {
+                               if($addr_reg_mask[$i][$j] == 0) {
+                                 $mask_exist  = 1;
+                                 if($first_print == 0) {
+                                    printf $of  "      if(int_reg_mask[0] == 1'b0) begin\n";
+                                    $first_print = 1;
+                                 }
+                                 #printf $of  "        ".$addr_reg_name[$i][$j]." <= int_regin".$addr_reg_bits[$i][$j].";\n";
+                                 printf $of  "        %-30s <= int_regin%-10s\n",$addr_reg_name[$i][$j],$addr_reg_bits[$i][$j].";";
+                                }
+                            }
+                            if($mask_exist == 1) {
+                              printf $of  "      end\n";
+                              $mask_exist  = 0;
+                            }
 
-             printf $of  "    end \n";
-             printf $of  "  end \n\n\n";
-      }
+                            printf $of  "    end \n";
+                            printf $of  "  end \n";
+                       }
+      ##################################################################################
+                       if($ro_addr == $rw_addr) {
+                          ## SW path
+                          $need_sw_path = 0;
+                          for($j=1; $j<=$addr_reg_no[$i]; $j++) {
+                             if($addr_reg_swph[$i][$j] eq "YES") {
+                               $need_sw_path = 1;
+                          }}
+
+                          if($need_sw_path == 1){
+                             printf $of  "  else begin \n";
+                          } 
+
+                          for($j=1; $j<=$addr_reg_no[$i]; $j++) {
+                             if($addr_reg_swph[$i][$j] eq "YES") {
+
+                               my @sw_name = split('\[', $addr_reg_name[$i][$j]);
+
+                               printf $of  "      if(".$sw_name[0]."_wr_ps".") begin\n";
+                               printf $of  "            ".$addr_reg_name[$i][$j]." <= ".$sw_name[0]."_wr_data[".$sw_name[1].";\n";
+                               printf $of  "      end\n";
+                          }}
+
+                          if($need_sw_path == 1){
+                          printf $of  "  end\n";
+                         }
+                       }
+      ##################################################################################
+        if($ro_addr == $rw_addr) {
+           printf $of  "end\n\n\n";
+        }
   }
 }
 ##--------------------------------------------------------------------------------------------------
@@ -356,24 +407,28 @@ sub add_reg_to_array {
       $addr_reg_name[$addr_no][$cur_reg_no]=$name;
       $addr_reg_bits[$addr_no][$cur_reg_no]="[".$bits."]";
       $addr_reg_mask[$addr_no][$cur_reg_no]=3;
+      $addr_reg_swph[$addr_no][$cur_reg_no]=$sw;
    } elsif($bits >=16) {
       $addr_reg_no[$addr_no]++;$cur_reg_no=$addr_reg_no[$addr_no];
       $addr_reg_addr[$addr_no]=$cur_addr;
       $addr_reg_name[$addr_no][$cur_reg_no]=$name;
       $addr_reg_bits[$addr_no][$cur_reg_no]="[".$bits."]";
       $addr_reg_mask[$addr_no][$cur_reg_no]=2;
+      $addr_reg_swph[$addr_no][$cur_reg_no]=$sw;
    } elsif($bits >=8) {
       $addr_reg_no[$addr_no]++;$cur_reg_no=$addr_reg_no[$addr_no];
       $addr_reg_addr[$addr_no]=$cur_addr;
       $addr_reg_name[$addr_no][$cur_reg_no]=$name;
       $addr_reg_bits[$addr_no][$cur_reg_no]="[".$bits."]";
       $addr_reg_mask[$addr_no][$cur_reg_no]=1;
+      $addr_reg_swph[$addr_no][$cur_reg_no]=$sw;
    } else {
       $addr_reg_no[$addr_no]++;$cur_reg_no=$addr_reg_no[$addr_no];
       $addr_reg_addr[$addr_no]=$cur_addr;
       $addr_reg_name[$addr_no][$cur_reg_no]=$name;
       $addr_reg_bits[$addr_no][$cur_reg_no]="[".$bits."]";
       $addr_reg_mask[$addr_no][$cur_reg_no]=0;
+      $addr_reg_swph[$addr_no][$cur_reg_no]=$sw;
    }
 }
 ##--------------------------------------------------------------------------------------------------
@@ -400,6 +455,7 @@ sub add_cond_cur_start_bit_gt_24 {
                  $addr_reg_name[$addr_no][$cur_reg_no]=$cur_name."[".$cur_name_start_bit.":".$cur_name_end_bit."]";
                  $addr_reg_bits[$addr_no][$cur_reg_no]="[".$cur_start_bit.":".$cur_end_bit."]";
                  $addr_reg_mask[$addr_no][$cur_reg_no]=3;
+                 $addr_reg_swph[$addr_no][$cur_reg_no]=$sw;
            } elsif($cur_end_bit >= 16) {
                  if($cur_start_bit == 24) {
                     $addr_reg_no[$addr_no]++;$cur_reg_no=$addr_reg_no[$addr_no];
@@ -407,12 +463,14 @@ sub add_cond_cur_start_bit_gt_24 {
                     $addr_reg_name[$addr_no][$cur_reg_no]=$cur_name."[".$cur_name_start_bit."]";
                     $addr_reg_bits[$addr_no][$cur_reg_no]="[24]";
                     $addr_reg_mask[$addr_no][$cur_reg_no]=3;
+                    $addr_reg_swph[$addr_no][$cur_reg_no]=$sw;
                  } else {
                     $addr_reg_no[$addr_no]++;$cur_reg_no=$addr_reg_no[$addr_no];
                     $addr_reg_addr[$addr_no]=$cur_addr;
                     $addr_reg_name[$addr_no][$cur_reg_no]=$cur_name."[".$cur_name_start_bit.":".(24-$cur_offset)."]";
                     $addr_reg_bits[$addr_no][$cur_reg_no]="[".$cur_start_bit.":24]";
                     $addr_reg_mask[$addr_no][$cur_reg_no]=3;
+                    $addr_reg_swph[$addr_no][$cur_reg_no]=$sw;
                  }
                  if($cur_end_bit == 23) {
                     $addr_reg_no[$addr_no]++;$cur_reg_no=$addr_reg_no[$addr_no];
@@ -420,12 +478,14 @@ sub add_cond_cur_start_bit_gt_24 {
                     $addr_reg_name[$addr_no][$cur_reg_no]=$cur_name."[".(23-$cur_offset)."]";
                     $addr_reg_bits[$addr_no][$cur_reg_no]="[23]";
                     $addr_reg_mask[$addr_no][$cur_reg_no]=2;
+                    $addr_reg_swph[$addr_no][$cur_reg_no]=$sw;
                  } else {
                     $addr_reg_no[$addr_no]++;$cur_reg_no=$addr_reg_no[$addr_no];
                     $addr_reg_addr[$addr_no]=$cur_addr;
                     $addr_reg_name[$addr_no][$cur_reg_no]=$cur_name."[".(23-$cur_offset).":".($cur_end_bit-$cur_offset)."]";
                     $addr_reg_bits[$addr_no][$cur_reg_no]="[23:".$cur_end_bit."]";
                     $addr_reg_mask[$addr_no][$cur_reg_no]=2;
+                    $addr_reg_swph[$addr_no][$cur_reg_no]=$sw;
                  }
            } elsif($cur_end_bit >= 8) {
                  if($cur_start_bit == 24) {
@@ -434,30 +494,35 @@ sub add_cond_cur_start_bit_gt_24 {
                     $addr_reg_name[$addr_no][$cur_reg_no]=$cur_name."[".$cur_name_start_bit."]";
                     $addr_reg_bits[$addr_no][$cur_reg_no]="[24]";
                     $addr_reg_mask[$addr_no][$cur_reg_no]=3;
+                    $addr_reg_swph[$addr_no][$cur_reg_no]=$sw;
                  } else {
                     $addr_reg_no[$addr_no]++;$cur_reg_no=$addr_reg_no[$addr_no];
                     $addr_reg_addr[$addr_no]=$cur_addr;
                     $addr_reg_name[$addr_no][$cur_reg_no]=$cur_name."[".$cur_name_start_bit.":".(24-$cur_offset)."]";
                     $addr_reg_bits[$addr_no][$cur_reg_no]="[".$cur_start_bit.":24]";
                     $addr_reg_mask[$addr_no][$cur_reg_no]=3;
+                    $addr_reg_swph[$addr_no][$cur_reg_no]=$sw;
                  }
                  $addr_reg_no[$addr_no]++;$cur_reg_no=$addr_reg_no[$addr_no];
                  $addr_reg_addr[$addr_no]=$cur_addr;
                  $addr_reg_name[$addr_no][$cur_reg_no]=$cur_name."[".(23-$cur_offset).":".(16-$cur_offset)."]";
                  $addr_reg_bits[$addr_no][$cur_reg_no]="[23:16]";
                  $addr_reg_mask[$addr_no][$cur_reg_no]=2;
+                 $addr_reg_swph[$addr_no][$cur_reg_no]=$sw;
                  if($cur_end_bit == 15) {
                     $addr_reg_no[$addr_no]++;$cur_reg_no=$addr_reg_no[$addr_no];
                     $addr_reg_addr[$addr_no]=$cur_addr;
                     $addr_reg_name[$addr_no][$cur_reg_no]=$cur_name."[".(15-$cur_offset)."]";
                     $addr_reg_bits[$addr_no][$cur_reg_no]="[15]";
                     $addr_reg_mask[$addr_no][$cur_reg_no]=1;
+                    $addr_reg_swph[$addr_no][$cur_reg_no]=$sw;
                  } else {
                     $addr_reg_no[$addr_no]++;$cur_reg_no=$addr_reg_no[$addr_no];
                     $addr_reg_addr[$addr_no]=$cur_addr;
                     $addr_reg_name[$addr_no][$cur_reg_no]=$cur_name."[".(15-$cur_offset).":".($cur_end_bit-$cur_offset)."]";
                     $addr_reg_bits[$addr_no][$cur_reg_no]="[15:".$cur_end_bit."]";
                     $addr_reg_mask[$addr_no][$cur_reg_no]=1;
+                    $addr_reg_swph[$addr_no][$cur_reg_no]=$sw;
                  }
            } else {
                  if($cur_start_bit == 24) {
@@ -466,35 +531,41 @@ sub add_cond_cur_start_bit_gt_24 {
                     $addr_reg_name[$addr_no][$cur_reg_no]=$cur_name."[".$cur_name_start_bit."]";
                     $addr_reg_bits[$addr_no][$cur_reg_no]="[24]";
                     $addr_reg_mask[$addr_no][$cur_reg_no]=3;
+                    $addr_reg_swph[$addr_no][$cur_reg_no]=$sw;
                  } else {
                     $addr_reg_no[$addr_no]++;$cur_reg_no=$addr_reg_no[$addr_no];
                     $addr_reg_addr[$addr_no]=$cur_addr;
                     $addr_reg_name[$addr_no][$cur_reg_no]=$cur_name."[".$cur_name_start_bit.":".(24-$cur_offset)."]";
                     $addr_reg_bits[$addr_no][$cur_reg_no]="[".$cur_start_bit.":24]";
                     $addr_reg_mask[$addr_no][$cur_reg_no]=3;
+                    $addr_reg_swph[$addr_no][$cur_reg_no]=$sw;
                  }
                  $addr_reg_no[$addr_no]++;$cur_reg_no=$addr_reg_no[$addr_no];
                  $addr_reg_addr[$addr_no]=$cur_addr;
                  $addr_reg_name[$addr_no][$cur_reg_no]=$cur_name."[".(23-$cur_offset).":".(16-$cur_offset)."]";
                  $addr_reg_bits[$addr_no][$cur_reg_no]="[23:16]";
                  $addr_reg_mask[$addr_no][$cur_reg_no]=2;
+                 $addr_reg_swph[$addr_no][$cur_reg_no]=$sw;
                  $addr_reg_no[$addr_no]++;$cur_reg_no=$addr_reg_no[$addr_no];
                  $addr_reg_addr[$addr_no]=$cur_addr;
                  $addr_reg_name[$addr_no][$cur_reg_no]=$cur_name."[".(15-$cur_offset).":".(8-$cur_offset)."]";
                  $addr_reg_bits[$addr_no][$cur_reg_no]="[15:8]";
                  $addr_reg_mask[$addr_no][$cur_reg_no]=1;
+                 $addr_reg_swph[$addr_no][$cur_reg_no]=$sw;
                  if($cur_end_bit == 7) {
                     $addr_reg_no[$addr_no]++; $cur_reg_no=$addr_reg_no[$addr_no];
                     $addr_reg_addr[$addr_no]=$cur_addr;
                     $addr_reg_name[$addr_no][$cur_reg_no]=$cur_name."[".(7-$cur_offset)."]";
                     $addr_reg_bits[$addr_no][$cur_reg_no]="[7]";
                     $addr_reg_mask[$addr_no][$cur_reg_no]=0;
+                    $addr_reg_swph[$addr_no][$cur_reg_no]=$sw;
                  } else {
                     $addr_reg_no[$addr_no]++; $cur_reg_no=$addr_reg_no[$addr_no];
                     $addr_reg_addr[$addr_no]=$cur_addr;
                     $addr_reg_name[$addr_no][$cur_reg_no]=$cur_name."[".(7-$cur_offset).":".($cur_end_bit-$cur_offset)."]";
                     $addr_reg_bits[$addr_no][$cur_reg_no]="[7:".$cur_end_bit."]";
                     $addr_reg_mask[$addr_no][$cur_reg_no]=0;
+                    $addr_reg_swph[$addr_no][$cur_reg_no]=$sw;
                  }
            }
 }
@@ -508,6 +579,7 @@ sub add_cond_cur_start_bit_gt_16 {
                  $addr_reg_name[$addr_no][$cur_reg_no]=$cur_name."[".$cur_name_start_bit.":".($cur_end_bit-$cur_offset)."]";
                  $addr_reg_bits[$addr_no][$cur_reg_no]="[".$cur_start_bit.":".$cur_end_bit."]";
                  $addr_reg_mask[$addr_no][$cur_reg_no]=2;
+                 $addr_reg_swph[$addr_no][$cur_reg_no]=$sw;
            } elsif($cur_end_bit >= 8) {
                  if($cur_start_bit == 16) {
                     $addr_reg_no[$addr_no]++;$cur_reg_no=$addr_reg_no[$addr_no];
@@ -515,12 +587,14 @@ sub add_cond_cur_start_bit_gt_16 {
                     $addr_reg_name[$addr_no][$cur_reg_no]=$cur_name."[".$cur_name_start_bit."]";
                     $addr_reg_bits[$addr_no][$cur_reg_no]="[16]";
                     $addr_reg_mask[$addr_no][$cur_reg_no]=2;
+                    $addr_reg_swph[$addr_no][$cur_reg_no]=$sw;
                  } else {
                     $addr_reg_no[$addr_no]++;$cur_reg_no=$addr_reg_no[$addr_no];
                     $addr_reg_addr[$addr_no]=$cur_addr;
                     $addr_reg_name[$addr_no][$cur_reg_no]=$cur_name."[".$cur_name_start_bit.":".(16-$cur_offset)."]";
                     $addr_reg_bits[$addr_no][$cur_reg_no]="[".$cur_start_bit.":16]";
                     $addr_reg_mask[$addr_no][$cur_reg_no]=2;
+                    $addr_reg_swph[$addr_no][$cur_reg_no]=$sw;
                  }
                  if($cur_end_bit == 15) {
                     $addr_reg_no[$addr_no]++;$cur_reg_no=$addr_reg_no[$addr_no];
@@ -528,12 +602,14 @@ sub add_cond_cur_start_bit_gt_16 {
                     $addr_reg_name[$addr_no][$cur_reg_no]=$cur_name."[".(15-$cur_offset)."]";
                     $addr_reg_bits[$addr_no][$cur_reg_no]="[15]";
                     $addr_reg_mask[$addr_no][$cur_reg_no]=1;
+                    $addr_reg_swph[$addr_no][$cur_reg_no]=$sw;
                  } else {
                     $addr_reg_no[$addr_no]++;$cur_reg_no=$addr_reg_no[$addr_no];
                     $addr_reg_addr[$addr_no]=$cur_addr;
                     $addr_reg_name[$addr_no][$cur_reg_no]=$cur_name."[".(15-$cur_offset).":".($cur_end_bit-$cur_offset)."]";
                     $addr_reg_bits[$addr_no][$cur_reg_no]="[15:".$cur_end_bit."]";
                     $addr_reg_mask[$addr_no][$cur_reg_no]=1;
+                    $addr_reg_swph[$addr_no][$cur_reg_no]=$sw;
                  }
            } else {
                  if($cur_start_bit == 16) {
@@ -542,30 +618,35 @@ sub add_cond_cur_start_bit_gt_16 {
                     $addr_reg_name[$addr_no][$cur_reg_no]=$cur_name."[".$cur_name_start_bit."]";
                     $addr_reg_bits[$addr_no][$cur_reg_no]="[16]";
                     $addr_reg_mask[$addr_no][$cur_reg_no]=2;
+                    $addr_reg_swph[$addr_no][$cur_reg_no]=$sw;
                  } else {
                     $addr_reg_no[$addr_no]++;$cur_reg_no=$addr_reg_no[$addr_no];
                     $addr_reg_addr[$addr_no]=$cur_addr;
                     $addr_reg_name[$addr_no][$cur_reg_no]=$cur_name."[".$cur_name_start_bit.":".(16-$cur_offset)."]";
                     $addr_reg_bits[$addr_no][$cur_reg_no]="[".$cur_start_bit.":16]";
                     $addr_reg_mask[$addr_no][$cur_reg_no]=2;
+                    $addr_reg_swph[$addr_no][$cur_reg_no]=$sw;
                  }
                  $addr_reg_no[$addr_no]++;$cur_reg_no=$addr_reg_no[$addr_no];
                  $addr_reg_addr[$addr_no]=$cur_addr;
                  $addr_reg_name[$addr_no][$cur_reg_no]=$cur_name."[".(15-$cur_offset).":".(8-$cur_offset)."]";
                  $addr_reg_bits[$addr_no][$cur_reg_no]="[15:8]";
                  $addr_reg_mask[$addr_no][$cur_reg_no]=1;
+                 $addr_reg_swph[$addr_no][$cur_reg_no]=$sw;
                  if($cur_end_bit == 7) {
                     $addr_reg_no[$addr_no]++;$cur_reg_no=$addr_reg_no[$addr_no];
                     $addr_reg_addr[$addr_no]=$cur_addr;
                     $addr_reg_name[$addr_no][$cur_reg_no]=$cur_name."[".(7-$cur_offset)."]";
                     $addr_reg_bits[$addr_no][$cur_reg_no]="[7]";
                     $addr_reg_mask[$addr_no][$cur_reg_no]=0;
+                    $addr_reg_swph[$addr_no][$cur_reg_no]=$sw;
                  } else {
                     $addr_reg_no[$addr_no]++;$cur_reg_no=$addr_reg_no[$addr_no];
                     $addr_reg_addr[$addr_no]=$cur_addr;
                     $addr_reg_name[$addr_no][$cur_reg_no]=$cur_name."[".(7-$cur_offset).":".($cur_end_bit-$cur_offset)."]";
                     $addr_reg_bits[$addr_no][$cur_reg_no]="[7:".$cur_end_bit."]";
                     $addr_reg_mask[$addr_no][$cur_reg_no]=0;
+                    $addr_reg_swph[$addr_no][$cur_reg_no]=$sw;
                  }
            } 
 }
@@ -579,6 +660,7 @@ sub add_cond_cur_start_bit_gt_8 {
                  $addr_reg_name[$addr_no][$cur_reg_no]=$cur_name."[".$cur_name_start_bit.":".($cur_end_bit-$cur_offset)."]";
                  $addr_reg_bits[$addr_no][$cur_reg_no]="[".$cur_start_bit.":".$cur_end_bit."]";
                  $addr_reg_mask[$addr_no][$cur_reg_no]=1;
+                 $addr_reg_swph[$addr_no][$cur_reg_no]=$sw;
            } else {
                  if($cur_start_bit == 8) {
                     $addr_reg_no[$addr_no]++;$cur_reg_no=$addr_reg_no[$addr_no];
@@ -586,12 +668,14 @@ sub add_cond_cur_start_bit_gt_8 {
                     $addr_reg_name[$addr_no][$cur_reg_no]=$cur_name."[".$cur_name_start_bit."]";
                     $addr_reg_bits[$addr_no][$cur_reg_no]="[8]";
                     $addr_reg_mask[$addr_no][$cur_reg_no]=1;
+                    $addr_reg_swph[$addr_no][$cur_reg_no]=$sw;
                  } else {
                     $addr_reg_no[$addr_no]++;$cur_reg_no=$addr_reg_no[$addr_no];
                     $addr_reg_addr[$addr_no]=$cur_addr;
                     $addr_reg_name[$addr_no][$cur_reg_no]=$cur_name."[".$cur_name_start_bit.":".(8-$cur_offset)."]";
                     $addr_reg_bits[$addr_no][$cur_reg_no]="[".$cur_start_bit.":8]";
                     $addr_reg_mask[$addr_no][$cur_reg_no]=1;
+                    $addr_reg_swph[$addr_no][$cur_reg_no]=$sw;
                     }
                  if($cur_end_bit == 7) {
                     $addr_reg_no[$addr_no]++;$cur_reg_no=$addr_reg_no[$addr_no];
@@ -599,12 +683,14 @@ sub add_cond_cur_start_bit_gt_8 {
                     $addr_reg_name[$addr_no][$cur_reg_no]=$cur_name."[".(7-$cur_offset)."]";
                     $addr_reg_bits[$addr_no][$cur_reg_no]="[7]";
                     $addr_reg_mask[$addr_no][$cur_reg_no]=0;
+                    $addr_reg_swph[$addr_no][$cur_reg_no]=$sw;
                  } else {
                     $addr_reg_no[$addr_no]++;$cur_reg_no=$addr_reg_no[$addr_no];
                     $addr_reg_addr[$addr_no]=$cur_addr;
                     $addr_reg_name[$addr_no][$cur_reg_no]=$cur_name."[".(7-$cur_offset).":".($cur_end_bit-$cur_offset)."]";
                     $addr_reg_bits[$addr_no][$cur_reg_no]="[7:".$cur_end_bit."]";
                     $addr_reg_mask[$addr_no][$cur_reg_no]=0;
+                    $addr_reg_swph[$addr_no][$cur_reg_no]=$sw;
                  }
            } 
 }
@@ -617,6 +703,7 @@ sub add_cond_cur_start_bit_gt_0 {
       $addr_reg_name[$addr_no][$cur_reg_no]=$cur_name."[".$cur_name_start_bit.":".($cur_end_bit-$cur_offset)."]";
       $addr_reg_bits[$addr_no][$cur_reg_no]="[".$cur_start_bit.":".$cur_end_bit."]";
       $addr_reg_mask[$addr_no][$cur_reg_no]=0;
+      $addr_reg_swph[$addr_no][$cur_reg_no]=$sw;
 }
 ##--------------------------------------------------------------------------------------------------
 
@@ -651,15 +738,16 @@ sub addr_array_init {
    $addr_reg_no[$addr_no]  = 0;
 
    if($attr eq "RW") {
-       $addr_reg_addr[$addr_no]= $addr;
+     $addr_reg_addr[$addr_no]= $addr;
    } else {
-       $addr_reg_addr[$addr_no]= -1;
+     $addr_reg_addr[$addr_no]= -1;
    }
 
    for($i=1; $i<33; $i++){
      $addr_reg_name[$addr_no][$i]    = "";
      $addr_reg_bits[$addr_no][$i]    = "";
      $addr_reg_mask[$addr_no][$i]    = 0;
+     $addr_reg_swph[$addr_no][$i]    = "";
    }
    for($i=0; $i<32; $i++){
      $addr_reg_bit_vld[$addr_no][$i] = 0;
